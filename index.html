@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+
+        <title>Babylon.js sample code</title>
+
+        <!-- Babylon.js -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.6.2/dat.gui.min.js"></script>
+        <script src="https://preview.babylonjs.com/ammo.js"></script>
+        <script src="https://preview.babylonjs.com/cannon.js"></script>
+        <script src="https://preview.babylonjs.com/Oimo.js"></script>
+        <script src="https://preview.babylonjs.com/earcut.min.js"></script>
+        <script src="https://preview.babylonjs.com/babylon.js"></script>
+        <script src="https://preview.babylonjs.com/materialsLibrary/babylonjs.materials.min.js"></script>
+        <script src="https://preview.babylonjs.com/proceduralTexturesLibrary/babylonjs.proceduralTextures.min.js"></script>
+        <script src="https://preview.babylonjs.com/postProcessesLibrary/babylonjs.postProcess.min.js"></script>
+        <script src="https://preview.babylonjs.com/loaders/babylonjs.loaders.js"></script>
+        <script src="https://preview.babylonjs.com/serializers/babylonjs.serializers.min.js"></script>
+        <script src="https://preview.babylonjs.com/gui/babylon.gui.min.js"></script>
+        <script src="https://preview.babylonjs.com/inspector/babylon.inspector.bundle.js"></script>
+
+        <style>
+            html, body {
+                overflow: hidden;
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                padding: 0;
+            }
+
+            #renderCanvas {
+                width: 100%;
+                height: 100%;
+                touch-action: none;
+            }
+        </style>
+    </head>
+<body>
+    <canvas id="renderCanvas"></canvas>
+    <script>
+        var canvas = document.getElementById("renderCanvas");
+
+        var startRenderLoop = function (engine, canvas) {
+            engine.runRenderLoop(function () {
+                if (sceneToRender && sceneToRender.activeCamera) {
+                    sceneToRender.render();
+                }
+            });
+        }
+
+        var engine = null;
+        var scene = null;
+        var sceneToRender = null;
+        var createDefaultEngine = function() { return new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true,  disableWebGL2Support: false}); };
+        var createScene = function () {
+    // This creates a basic Babylon Scene object (non-mesh)
+    var scene = new BABYLON.Scene(engine);
+
+    // This creates and positions a free camera (non-mesh)
+    var camera = new BABYLON.FreeCamera("camera1", new BABYLON.Vector3(0, 5, -10), scene);
+
+    // This targets the camera to scene origin
+    camera.setTarget(BABYLON.Vector3.Zero());
+
+    // This attaches the camera to the canvas
+    camera.attachControl(canvas, true);
+
+    // This creates a light, aiming 0,1,0 - to the sky (non-mesh)
+    var light = new BABYLON.DirectionalLight("dir01", new BABYLON.Vector3(-1, -2, -1), scene);
+    light.position = new BABYLON.Vector3(20, 40, 20);
+	light.intensity = 0.5;
+
+    // Default intensity is 1. Let's dim the light a small amount
+    light.intensity = 0.7;
+
+    const meshes = createRandomStaticMeshes(10, scene)
+    const navPlugin = new BABYLON.RecastJSPlugin()  
+
+    // Our built-in 'ground' shape.
+    var ground = BABYLON.MeshBuilder.CreateGround("ground", {width: 20, height: 20}, scene);
+    ground.metadata = "ground"
+    var groundMat = new BABYLON.StandardMaterial("groundMat", scene)
+    groundMat.diffuseColor = new BABYLON.Color3(0, 1, 0)
+    ground.material = groundMat;
+
+    var shadowGenerator = new BABYLON.ShadowGenerator(1024, light);
+    shadowGenerator.getShadowMap().renderList.push(player);
+    ground.receiveShadows = true
+
+    var parameters = {
+        cs: 0.2,
+        ch: 0.5,
+        walkableSlopeAngle: 35,
+        walkableHeight: 0.1,
+        walkableClimb: 1,
+        walkableRadius: 1,
+        maxEdgeLen: 12.,
+        maxSimplificationError: 1.3,
+        minRegionArea: 8,
+        mergeRegionArea: 20,
+        maxVertsPerPoly: 6,
+        detailSampleDist: 6,
+        detailSampleMaxError: 1,
+    };
+
+    meshes.push(ground)
+    navPlugin.createNavMesh(meshes, parameters)
+
+    var player = BABYLON.MeshBuilder.CreateCapsule("Player", {height: 1}, scene)
+    player.position.y = 1
+    var playerFront = BABYLON.MeshBuilder.CreateBox("playerront", {size: 0.1}, scene)
+    playerFront.position = new BABYLON.Vector3(0, 0.25, 0.25)
+    playerFrontMat = new BABYLON.StandardMaterial("playerFrontMat", scene)
+    playerFrontMat.diffuseColor = new BABYLON.Color3(0, 0.76, 1)
+    playerFront.material = playerFrontMat;
+    playerFront.parent = player;
+    var agentParams = {
+            radius: 0.1,
+            height: 0.2,
+            maxAcceleration: 4.0,
+            maxSpeed: 1.0,
+            collisionQueryRange: 0.5,
+            pathOptimizationRange: 0.0,
+            separationWeight: 1.0
+    };
+
+    const crowd = navPlugin.createCrowd(10, 1, scene)
+    const agent = crowd.addAgent(player.position, agentParams, player)
+    scene.draging = false
+    scene.moveTarget = null
+    scene.rotationTarget = null
+
+    scene.onPointerMove = (evt) => {
+        if(evt.buttons == 2){
+            this.rotationTarget = sendRay(camera, scene)
+        }
+    }
+
+    scene.onPointerDown = (evt) => {
+        if(evt.button == 2){
+            this.draging = true
+            this.moveTarget = sendRay(camera, scene)
+        }
+    }
+
+    scene.onPointerUp = (evt) => {
+        if(evt.button == 2){
+            crowd.agentGoto(agent, this.moveTarget)
+            this.draging = false
+        }
+    }
+
+    scene.onBeforeRenderObservable.add(() => {
+        const velo = crowd.getAgentVelocity(agent)
+        if(velo.length() > 0){
+            player.lookAt(crowd.getAgentNextTargetPath(agent))
+            player.rotation.x = 0
+            return
+        }
+        if(this.rotationTarget){
+            if(this.draging === true) return
+            player.lookAt(this.rotationTarget)
+            player.rotation.x = 0
+            const radius = this.rotationTarget.substract(this.moveTarget).length()
+            BABYLON.MeshBuilder.CreateDisc("disc", {radius})
+        }
+        
+    })
+
+    camera.inputs.removeMouse()
+
+    return scene;
+};
+
+function sendRay(camera, scene){
+    const ray = scene.createPickingRay(
+        scene.pointerX,
+        scene.pointerY,
+        BABYLON.Matrix.Identity(),
+        camera
+    );
+    const hit = scene.pickWithRay(ray);
+    if(hit.pickedMesh.metadata === "ground"){
+        return hit.pickedPoint
+    }
+}
+
+function createRandomStaticMeshes(anzahl, scene){
+    const meshes = []
+    for(let i=0; i < anzahl; i++){
+        const box = BABYLON.MeshBuilder.CreateBox(`Box${anzahl}`, {size: 2}, scene)
+        let x = 10 * Math.random()
+        let z = 10 * Math.random()
+        if((Math.floor(x) % 2 == 0)) x = x * -1
+        if((Math.floor(z) % 2 == 0)) x = z * -1
+        box.position = new BABYLON.Vector3(x, 0, z)
+        meshes.push(box)
+    }
+    return meshes;
+}
+                window.initFunction = async function() {
+                    
+                    await Recast();
+                    var asyncEngineCreation = async function() {
+                        try {
+                        return createDefaultEngine();
+                        } catch(e) {
+                        console.log("the available createEngine function failed. Creating the default engine instead");
+                        return createDefaultEngine();
+                        }
+                    }
+
+                    window.engine = await asyncEngineCreation();
+        if (!engine) throw 'engine should not be null.';
+        startRenderLoop(engine, canvas);
+        window.scene = createScene();};
+        initFunction().then(() => {sceneToRender = scene                    
+        });
+
+        // Resize
+        window.addEventListener("resize", function () {
+            engine.resize();
+        });
+    </script>
+</body>
+</html>
